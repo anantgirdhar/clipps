@@ -1,34 +1,41 @@
 #!/bin/bash
 
 # Logic:
-# While possible, get the next subdir from unsorted. 
+# While possible, get the next subdir from source.
 # Check the CreateDate for all the images.
 # Split the files into raw and jpgs (create dirs if needed).
-# Copy folder to yyyy/mm folder at save level as unsorted.
+# Copy folder to a yyyy/mm folder structure.
 # Rename folder to day range (separated by underscores) and a trailing underscore (so that the description can be placed after it). 
 # Compare sizes of the two folders and number of files (quick copy success check).
 # Rename folder to have prefix PROC
 
-# Usage: ./sortpix.sh unsorted_dir
+# Usage: ./sortpix.sh [source [unprocessed]]
+# Default source: ./source
+# Default unprocessed: ./unprocessed
 
-UNSORTED=$1
-SORTED='./'
+trap "exit" SIGINT;
 
-# Check if an unsorted dir has been provided
-if [ -z $UNSORTED ]
-then
-    echo 'No unsorted dir specified. Exiting.'
-    return 1
+SOURCE="$1"
+UNPROCESSED="$2"
+
+# Check if a source dir has been provided
+if [ -z "$SOURCE" ]; then
+	SOURCE='./source'
+fi
+
+# Check if an unprocessed dir has been provided
+if [ -z "$UNPROCESSED" ]; then
+	UNPROCESSED='./unprocessed'
 fi
 
 # Get the list of unprocessed dirs in the unsorted dir
-dirlist=`ls $UNSORTED | grep --invert-match '^PROC'`
+dirlist=`ls $SOURCE | grep --invert-match '^PROC'`
 
 # Run until all dirs have been processed
 for dir in $dirlist
 do
     echo $dir
-    initial_path=$UNSORTED/$dir
+    initial_path=$SOURCE/$dir
     # Get all the unique created dates for all files in this directory
     dates=$( 
         exiftool -createdate -d "%Y*%m*%d" $initial_path/* | 
@@ -69,13 +76,13 @@ do
     mv $initial_path/*.NEF $initial_path/raw/
 
     # If the dir for this month does not exist, create it
-    if [ ! -d $SORTED/$start_year ]
+    if [ ! -d $UNPROCESSED/$start_year ]
     then
-        mkdir $SORTED/$start_year
+        mkdir $UNPROCESSED/$start_year
     fi
-    if [ ! -d $SORTED/$start_year/$start_month ]
+    if [ ! -d $UNPROCESSED/$start_year/$start_month ]
     then
-        mkdir $SORTED/$start_year/$start_month
+        mkdir $UNPROCESSED/$start_year/$start_month
     fi
 
     # Create a name for the final location dir
@@ -86,10 +93,11 @@ do
         date_prefix="$date_prefix""_""$end_month""$end_day"
     fi
     final_dir_name="$date_prefix""_""$dir"
-    final_path=$SORTED/$start_year/$start_month/$final_dir_name
+    final_path=$UNPROCESSED/$start_year/$start_month/$final_dir_name
     
+    echo "Copying from $initial_path to $final_path."
     # Sort files and rename dirs based on date
-    cp -r $initial_path $final_path
+    rsync -avh --progress --info=progress2 $initial_path $final_path
     # Compare sizes of initial and final
     #echo 'Initial sizes:'
     #du -s $initial_path
@@ -98,17 +106,16 @@ do
     proc_prefix="PROC"
     initial_size=$( echo `du -s $initial_path` | cut -d ' ' -f 1 )
     final_size=$( echo `du -s $final_path` | cut -d ' ' -f 1 )
-    if [ $initial_size -ne $final_size ]
-    then
-        echo "Error: Size mismatch."
-        echo $initial_size
-        echo $final_size
-        #TODO: Indicate this on the directory rename too
-        proc_prefix="PROC_CHECKSIZE"
+    if [ $initial_size -ne $final_size ]; then
+	echo "Error: Size mismatch."
+	echo $initial_size
+	echo $final_size
+	#TODO: Indicate this on the directory rename too
+	proc_prefix="PROC_CHECKSIZE"
     fi
 
     # Rename source folder to indicate it has been processed
-    mv $UNSORTED/$dir $UNSORTED/"$proc_prefix"_$dir
+    mv $SOURCE/$dir $SOURCE/"$proc_prefix"_$dir
 
     #TODO: Rename image files to some combination of device and timestamp
     #TODO: Add verbose option
